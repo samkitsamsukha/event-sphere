@@ -1,10 +1,10 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Enum, String
+from sqlalchemy import DateTime, Enum, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, created_at, updated_at
+from app.models.base import Base
 
 
 class UserRole(str, enum.Enum):
@@ -20,7 +20,24 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
-    created_at: Mapped[datetime]
-    updated_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     events = relationship("Event", back_populates="publisher")
+    user_interests = relationship(
+        "UserInterest",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        overlaps="users,interests",
+    )
+    interests = relationship(
+        "Interest",
+        secondary="user_interests",
+        back_populates="users",
+        viewonly=True,
+        overlaps="user,interest,user_interests",
+    )

@@ -62,17 +62,68 @@ Open:
 
 ## Current scope
 
-Implemented starter pieces:
-- User registration/login
-- Argon2 password hashing
-- JWT access tokens
-- Role field for CUSTOMER/PUBLISHER
-- Current-user endpoint
+Implemented:
+- User registration and login at `/api/auth/register` and `/api/auth/login`
+- Argon2 password hashing and JWT bearer access tokens
+- Authenticated user endpoint at `/api/auth/me`
+- Customer and publisher role dependencies
+- Profile retrieval and updates at `/api/users/me`
+- Explicit interest relationships with add/list/remove endpoints at
+  `/api/users/me/interests`
 - Publisher event creation
-- Public event listing/detail
+- Publisher event update, publish, cancel, delete, and own-event listing
+- Public published-event listing and detail discovery with keyword, category,
+  location, date, pagination, and sorting filters
+- Deterministic event semantic text generation and reusable lazy-loaded embeddings
+- Behavioral interaction tracking at `/api/interactions`
+- Configurable, explainable recommendations at `/api/recommendations`
 - SQLAlchemy async database access
 - Alembic migrations
 - pgvector column
 - Sentence-transformer embedding service
 
-Next modules should add registrations, interests, interactions, recommendation retrieval/ranking, and background embedding updates.
+The current migration head is `0004_interactions`. Apply all migrations with:
+
+```bash
+alembic upgrade head
+```
+
+Recommendations use explicit interests, weighted behavioral history, time decay,
+semantic embeddings, vector candidate generation, popularity, and recency. The
+debug endpoint is development-only.
+
+Interaction types are `VIEW`, `CLICK`, `SEARCH`, `LIKE`, `SAVE`, and `REGISTER`.
+Short-window duplicate `VIEW`, `CLICK`, and `SEARCH` events are rejected.
+
+Recommendation pipeline:
+
+```text
+event -> semantic text -> 384d embedding
+     -> pgvector candidate generation
+     -> eligibility filtering
+     -> interest/behavior/recency/popularity features
+     -> transparent weighted ranking
+     -> recommendations
+```
+
+## Frontend integration
+
+From `frontend`, configure:
+
+```text
+VITE_API_URL=http://127.0.0.1:8000/api
+```
+
+The React app stores the access token in local storage under
+`eventsphere_access_token`, attaches it through the centralized Axios client,
+and clears it after a `401 Unauthorized` response. Start both applications:
+
+```powershell
+# backend
+uvicorn app.main:app --reload
+
+# frontend
+npm run dev
+```
+
+The frontend communicates with the backend through `frontend/src/api.js`.

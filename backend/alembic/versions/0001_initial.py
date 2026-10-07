@@ -20,8 +20,6 @@ def upgrade() -> None:
 
     user_role = sa.Enum("CUSTOMER", "PUBLISHER", name="user_role")
     event_status = sa.Enum("DRAFT", "PUBLISHED", "CANCELLED", name="event_status")
-    user_role.create(op.get_bind(), checkfirst=True)
-    event_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "users",
