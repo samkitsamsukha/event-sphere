@@ -9,6 +9,7 @@ from app.models.event import Event
 from app.models.interaction import Interaction
 from app.models.user import User
 from app.schemas.interaction import InteractionCreate, InteractionResponse
+from app.services.recommendations import invalidate_profile_cache
 
 router = APIRouter(prefix="/interactions", tags=["interactions"])
 _DEDUPLICATED_TYPES = {"VIEW", "CLICK", "SEARCH"}
@@ -45,6 +46,7 @@ async def create_interaction(
     db.add(interaction)
     await db.commit()
     await db.refresh(interaction)
+    invalidate_profile_cache(current_user.id)
     return interaction
 
 
@@ -52,10 +54,16 @@ async def create_interaction(
 async def list_my_interactions(
     db: DbSession,
     current_user: Annotated[User, Depends(get_current_user)],
+    page: int = 1,
+    page_size: int = 50,
 ) -> list[Interaction]:
+    if page < 1 or page_size < 1 or page_size > 100:
+        raise HTTPException(status_code=422, detail="Invalid pagination")
     result = await db.execute(
         select(Interaction)
         .where(Interaction.user_id == current_user.id)
         .order_by(Interaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return list(result.scalars().all())

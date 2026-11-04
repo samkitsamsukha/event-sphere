@@ -1,6 +1,7 @@
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import monotonic
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,13 @@ from app.models.event import Event, EventStatus
 from app.models.interaction import Interaction, InteractionType
 from app.models.interest import Interest, UserInterest
 from app.services.embeddings import generate_user_profile_embedding
+
+_PROFILE_CACHE: dict[int, tuple[float, list[float] | None]] = {}
+_PROFILE_CACHE_TTL_SECONDS = 60.0
+
+
+def invalidate_profile_cache(user_id: int) -> None:
+    _PROFILE_CACHE.pop(user_id, None)
 
 
 @dataclass(frozen=True)
@@ -50,6 +58,9 @@ class RecommendationService:
         }
 
     async def build_user_profile(self, user_id: int) -> list[float] | None:
+        cached = _PROFILE_CACHE.get(user_id)
+        if cached and monotonic() - cached[0] < _PROFILE_CACHE_TTL_SECONDS:
+            return cached[1]
         rows = await self.db.execute(
             select(Interaction, Event.embedding)
             .join(Event, Event.id == Interaction.event_id)
@@ -66,7 +77,9 @@ class RecommendationService:
             weight = base_weight * time_decay(age_days)
             embeddings.append(list(embedding))
             weights.append(weight)
-        return generate_user_profile_embedding(embeddings, weights)
+        profile = generate_user_profile_embedding(embeddings, weights)
+        _PROFILE_CACHE[user_id] = (monotonic(), profile)
+        return profile
 
     async def generate_candidates(
         self, user_id: int, profile_vector: list[float] | None
