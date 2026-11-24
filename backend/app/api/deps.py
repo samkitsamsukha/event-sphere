@@ -47,3 +47,19 @@ async def require_publisher(
     if current_user.role != UserRole.PUBLISHER:
         raise HTTPException(status_code=403, detail="Publisher role required")
     return current_user
+
+
+async def require_event_manager(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if current_user.role not in (UserRole.PUBLISHER, UserRole.ADMIN):
+        raise HTTPException(status_code=403, detail="Publisher or admin role required")
+    return current_user
+
+
+async def require_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return current_user

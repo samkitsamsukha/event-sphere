@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import Select, asc, desc, or_, select
 
-from app.api.deps import DbSession, require_publisher
+from app.api.deps import DbSession, require_event_manager
 from app.models.event import Event, EventStatus
 from app.models.user import User
 from app.schemas.event import EventCreate, EventResponse, EventUpdate
@@ -31,7 +31,7 @@ async def get_owned_event(event_id: int, user_id: int, db: DbSession) -> Event:
 async def create_event(
     payload: EventCreate,
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> Event:
     validate_event_times(payload.start_time, payload.end_time)
     event = Event(
@@ -93,8 +93,11 @@ async def list_events(
 @router.get("/mine", response_model=list[EventResponse])
 async def list_my_events(
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> list[Event]:
+    if current_user.role.value == "ADMIN":
+        result = await db.execute(select(Event).order_by(Event.created_at.desc()))
+        return list(result.scalars().all())
     result = await db.execute(
         select(Event).where(Event.publisher_id == current_user.id).order_by(Event.created_at.desc())
     )
@@ -114,9 +117,13 @@ async def update_event(
     event_id: int,
     payload: EventUpdate,
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> Event:
-    event = await get_owned_event(event_id, current_user.id, db)
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if current_user.role.value != "ADMIN" and event.publisher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this event")
     if event.status != EventStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Only draft events can be updated")
 
@@ -138,9 +145,13 @@ async def update_event(
 async def delete_event(
     event_id: int,
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> Response:
-    event = await get_owned_event(event_id, current_user.id, db)
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if current_user.role.value != "ADMIN" and event.publisher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this event")
     await db.delete(event)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -150,9 +161,13 @@ async def delete_event(
 async def publish_event(
     event_id: int,
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> Event:
-    event = await get_owned_event(event_id, current_user.id, db)
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if current_user.role.value != "ADMIN" and event.publisher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this event")
     if event.status != EventStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Only draft events can be published")
     event.status = EventStatus.PUBLISHED
@@ -165,9 +180,13 @@ async def publish_event(
 async def cancel_event(
     event_id: int,
     db: DbSession,
-    current_user: Annotated[User, Depends(require_publisher)],
+    current_user: Annotated[User, Depends(require_event_manager)],
 ) -> Event:
-    event = await get_owned_event(event_id, current_user.id, db)
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if current_user.role.value != "ADMIN" and event.publisher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this event")
     if event.status != EventStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Only published events can be cancelled")
     event.status = EventStatus.CANCELLED

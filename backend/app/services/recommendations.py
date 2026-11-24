@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.models.event import Event, EventStatus
 from app.models.interaction import Interaction, InteractionType
 from app.models.interest import Interest, UserInterest
+from app.models.search_history import SearchHistory
 from app.services.embeddings import generate_user_profile_embedding
 
 _PROFILE_CACHE: dict[int, tuple[float, list[float] | None]] = {}
@@ -77,6 +78,16 @@ class RecommendationService:
             weight = base_weight * time_decay(age_days)
             embeddings.append(list(embedding))
             weights.append(weight)
+        search_rows = await self.db.execute(
+            select(SearchHistory.embedding, SearchHistory.created_at)
+            .where(SearchHistory.user_id == user_id, SearchHistory.embedding.is_not(None))
+            .order_by(SearchHistory.created_at.desc())
+            .limit(20)
+        )
+        for embedding, created_at in search_rows:
+            age_days = max(0.0, (now - created_at).total_seconds() / 86400)
+            embeddings.append(list(embedding))
+            weights.append(0.35 * time_decay(age_days))
         profile = generate_user_profile_embedding(embeddings, weights)
         _PROFILE_CACHE[user_id] = (monotonic(), profile)
         return profile

@@ -8,6 +8,21 @@ const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'm
 function LoadingSpinner() { return <div className="spinner" role="status" aria-label="Loading" /> }
 function EmptyState({ children }) { return <div className="empty-state">{children}</div> }
 function ErrorState({ message }) { return <div className="error-state">{message || 'Something went wrong.'}</div> }
+const sponsorMessages = [
+  { eyebrow: 'PARTNER SPOTLIGHT', title: 'Make your next move memorable.', copy: 'Reach the people already looking for their next great experience.', action: 'Partner with EventSphere' },
+  { eyebrow: 'CITY PICKS', title: 'Big ideas. Small rooms. Real connection.', copy: 'Featured experiences from the communities making your city brighter.', action: 'Explore the spotlight' },
+  { eyebrow: 'FOR ORGANIZERS', title: 'Your audience is already here.', copy: 'Promote a launch, workshop, or gathering in the places people discover events.', action: 'Promote an event' },
+]
+
+function SponsoredSpotlight() {
+  const [active, setActive] = useState(0)
+  useEffect(() => { const timer = setInterval(() => setActive((value) => (value + 1) % sponsorMessages.length), 5000); return () => clearInterval(timer) }, [])
+  const sponsor = sponsorMessages[active]
+  return <aside className="sponsor-spotlight" aria-label="Sponsored spotlight">
+    <div><span className="eyebrow">{sponsor.eyebrow}</span><h3>{sponsor.title}</h3><p>{sponsor.copy}</p><button className="sponsor-link">{sponsor.action} ↗</button></div>
+    <div className="spotlight-dots">{sponsorMessages.map((item, index) => <button key={item.eyebrow} aria-label={`Show spotlight ${index + 1}`} className={index === active ? 'active' : ''} onClick={() => setActive(index)} />)}</div>
+  </aside>
+}
 
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -40,7 +55,7 @@ const useAuth = () => useContext(AuthContext)
 function Navbar() {
   const { user, logout } = useAuth()
   return <header className="navbar"><Link className="brand" to="/">Event<span>Sphere</span></Link><nav>
-    <Link to="/explore">Explore</Link>{user && <Link to="/home">Home</Link>}{user?.role === 'PUBLISHER' && <Link to="/publisher">Publisher</Link>}
+    <Link to="/explore">Explore</Link>{user && <Link to="/home">Home</Link>}{user?.role === 'PUBLISHER' && <Link to="/publisher">Publisher</Link>}{user?.role === 'ADMIN' && <Link className="admin-link" to="/admin">Admin</Link>}
     {user ? <><Link to="/saved">Saved</Link><Link to="/profile">{user.name}</Link><button className="link-button" onClick={logout}>Log out</button></> : <><Link to="/login">Log in</Link><Link className="button small" to="/register">Join free</Link></>}
   </nav></header>
 }
@@ -80,7 +95,7 @@ function EventGrid({ events, empty = 'No events found.', onChanged }) {
 
 function SearchBar({ initial = '', onSearch }) {
   const [value, setValue] = useState(initial)
-  return <form className="search-bar" onSubmit={(e) => { e.preventDefault(); onSearch(value) }}><span>⌕</span><input aria-label="Search events" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Search events, topics, or places" /><button className="button">Search</button></form>
+  return <form className="search-bar" onSubmit={(e) => { e.preventDefault(); if (value.trim()) onSearch(value.trim()) }}><span className="search-icon">⌕</span><input aria-label="Search events" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Try “AI workshops in Bangalore” or “live music”" /><button className="button">{value ? 'Discover' : 'Search'}</button></form>
 }
 
 function Filters({ params, setParams }) {
@@ -88,18 +103,35 @@ function Filters({ params, setParams }) {
 }
 
 function Explore() {
-  const [params, setSearchParams] = useSearchParams(); const [events, setEvents] = useState([]); const [state, setState] = useState({ loading: true, error: '' })
+  const { user } = useAuth()
+  const [params, setSearchParams] = useSearchParams()
+  const [events, setEvents] = useState([])
+  const [history, setHistory] = useState([])
+  const [state, setState] = useState({ loading: true, error: '' })
   const setParams = (values) => { const next = new URLSearchParams(params); Object.entries(values).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key)); setSearchParams(next) }
   const query = params.toString()
-  useEffect(() => { api.get('/events', { params: Object.fromEntries(new URLSearchParams(query)) }).then(({ data }) => { setEvents(data); setState({ loading: false, error: '' }) }).catch((e) => setState({ loading: false, error: e.message })) }, [query])
-  return <Page><div className="page-heading"><div><span className="eyebrow">DISCOVER</span><h1>Find your next <em>great moment.</em></h1></div></div><SearchBar initial={params.get('keyword') || ''} onSearch={(value) => setParams({ keyword: value })} /><Filters params={params} setParams={setParams} />{state.loading ? <LoadingSpinner /> : state.error ? <ErrorState message={state.error} /> : <EventGrid events={events} />}</Page>
+  const keyword = params.get('keyword')
+  useEffect(() => {
+    const request = user && keyword
+      ? api.get('/recommendations/search', { params: { q: keyword, limit: 24 } })
+      : api.get('/events', { params: Object.fromEntries(new URLSearchParams(query)) })
+    request.then(({ data }) => { setEvents(data); setState({ loading: false, error: '' }) })
+      .catch((e) => setState({ loading: false, error: e.response?.data?.detail || e.message }))
+  }, [query, keyword, user])
+  useEffect(() => {
+    if (!user) return
+    api.get('/recommendations/search/history', { params: { limit: 6 } }).then(({ data }) => setHistory(data)).catch(() => {})
+  }, [query, user])
+  const clearSearch = () => { const next = new URLSearchParams(params); next.delete('keyword'); setSearchParams(next) }
+  const popular = ['AI and machine learning', 'Live music', 'Design workshops', 'Startup events', 'Creative community']
+  return <Page><div className="discover-hero"><div><span className="eyebrow">DISCOVER WITH CONTEXT</span><h1>Find your next <em>great moment.</em></h1><p>Search with natural language. EventSphere learns from what you explore and gets smarter over time.</p></div><div className="discovery-orb"><strong>{history.length}</strong><span>searches<br />remembered</span></div></div><SearchBar key={params.get('keyword') || 'empty'} initial={params.get('keyword') || ''} onSearch={(value) => setParams({ keyword: value })} /><div className="discovery-chips"><span>Try</span>{popular.map((item) => <button key={item} onClick={() => setParams({ keyword: item })}>{item}</button>)}</div>{user && history.length > 0 && <aside className="history-strip"><div><span className="eyebrow">FROM YOUR SEARCH HISTORY</span>{history.slice(0, 4).map((item) => <button key={item.id} onClick={() => setParams({ keyword: item.query })}>{item.query}</button>)}</div>{params.get('keyword') && <button className="text-action" onClick={clearSearch}>Clear search</button>}</aside>}<Filters params={params} setParams={setParams} />{state.loading ? <LoadingSpinner /> : state.error ? <ErrorState message={state.error} /> : <><div className="results-heading"><div><span className="eyebrow">{params.get('keyword') ? 'SEMANTIC MATCHES' : 'EXPLORE ALL'}</span><h2>{params.get('keyword') ? `Results for “${params.get('keyword')}”` : 'Moments happening near you'}</h2></div><span className="event-count">{events.length} events found</span></div><EventGrid events={events} empty="No close matches yet. Try a broader topic or clear the filters." /></>}</Page>
 }
 
 function EventDetails() {
   const { id } = useParams(); const { user } = useAuth(); const [event, setEvent] = useState(null); const [error, setError] = useState('')
   useEffect(() => { api.get(`/events/${id}`).then(({ data }) => { setEvent(data); if (user) api.post('/interactions', { event_id: data.id, interaction_type: 'VIEW' }).catch(() => {}) }).catch((e) => setError(e.response?.data?.detail || 'Event not found')) }, [id, user])
   if (error) return <Page><ErrorState message={error} /></Page>; if (!event) return <Page><LoadingSpinner /></Page>
-  return <Page><Link className="back" to="/explore">← Back to explore</Link><div className="detail"><span className="eyebrow">{event.category || 'Event'}</span><h1>{event.title}</h1><p className="lead">{event.description}</p><div className="detail-facts"><span>◷ {formatDate(event.start_time)}</span><span>⌖ {event.location || 'Online'}</span><span>Capacity: {event.capacity || 'Open'}</span></div>{user && <button className="button" onClick={() => api.post('/interactions', { event_id: event.id, interaction_type: 'REGISTER' })}>Register for event</button>}<div className="detail-copy"><h2>About this event</h2><p>{event.description}</p><div className="tags">{event.tags?.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div></div></Page>
+  return <Page><Link className="back" to="/explore">← Back to explore</Link><div className="detail"><span className="eyebrow">{event.category || 'Event'}</span><h1>{event.title}</h1><p className="lead">{event.description}</p><div className="detail-facts"><span>◷ {formatDate(event.start_time)}</span><span>⌖ {event.location || 'Online'}</span><span>Capacity: {event.capacity || 'Open'}</span></div>{user && <button className="button" onClick={() => api.post('/interactions', { event_id: event.id, interaction_type: 'REGISTER' })}>Register for event</button>}<div className="detail-copy"><h2>About this event</h2><p>{event.description}</p><div className="tags">{event.tags?.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div></div><SponsoredSpotlight /></Page>
 }
 
 function AuthForm({ register = false }) {
@@ -111,13 +143,45 @@ function AuthForm({ register = false }) {
 function Home() {
   const [recommended, setRecommended] = useState([]); const [upcoming, setUpcoming] = useState([])
   useEffect(() => { api.get('/recommendations').then(({ data }) => setRecommended(data)).catch(() => {}); api.get('/events', { params: { page_size: 6 } }).then(({ data }) => setUpcoming(data)).catch(() => {}) }, [])
-  return <Page><div className="hero-copy"><span className="eyebrow">YOUR EVENT UNIVERSE</span><h1>Good things happen<br /><em>when you show up.</em></h1><p>Discover gatherings shaped around your interests, your city, and what you want to explore next.</p><Link className="button" to="/explore">Explore events →</Link></div><Section title="Recommended for you" action={recommended.length ? null : 'Choose interests to personalize'}><EventGrid events={recommended} empty="We’re warming up your recommendations. Explore an event or choose interests to get started." /></Section><Section title="Upcoming events"><EventGrid events={upcoming} /></Section></Page>
+  return <Page><div className="hero-copy"><div><span className="eyebrow">YOUR EVENT UNIVERSE</span><h1>Good things happen<br /><em>when you show up.</em></h1><p>Discover gatherings shaped around your interests, your city, and what you want to explore next.</p><Link className="button" to="/explore">Explore events →</Link></div><div className="hero-orbit"><span>LIVE</span><strong>06</strong><small>new moments<br />this season</small></div></div><SponsoredSpotlight /><Section title="Recommended for you" action={recommended.length ? null : 'Choose interests to personalize'}><EventGrid events={recommended} empty="We’re warming up your recommendations. Explore an event or choose interests to get started." /></Section><Section title="Upcoming events"><EventGrid events={upcoming} /></Section></Page>
 }
 function Section({ title, action, children }) { return <section className="section"><div className="section-heading"><h2>{title}</h2>{action && <Link to="/profile">{action} →</Link>}</div>{children}</section> }
 
-function Profile() { const { user } = useAuth(); const [interests, setInterests] = useState([]); const [name, setName] = useState(user.name); useEffect(() => { api.get('/users/me/interests').then(({ data }) => setInterests(data)) }, []); const save = async (e) => { e.preventDefault(); await api.put('/users/me', { name }); }; return <Page><div className="page-heading"><span className="eyebrow">YOUR SPACE</span><h1>Profile & interests.</h1></div><div className="profile-layout"><form className="panel" onSubmit={save}><h2>Profile</h2><label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Email<input disabled value={user.email} /></label><button className="button">Save changes</button></form><div className="panel"><h2>Interests</h2><div className="tags">{interests.map((item) => <span className="tag" key={item.id}>{item.name}</span>)}</div><p className="muted">Your interests help shape recommendations.</p></div></div></Page> }
+function Profile() {
+  const { user } = useAuth()
+  const [interests, setInterests] = useState([])
+  const [name, setName] = useState(user.name)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const load = () => api.get('/users/me/interests').then(({ data }) => setInterests(data)).catch(() => {})
+  useEffect(load, [])
+  const save = async (e) => { e.preventDefault(); setError(''); try { await api.put('/users/me', { name }); setSaved(true); setTimeout(() => setSaved(false), 1800) } catch (err) { setError(err.response?.data?.detail || 'Unable to save profile') } }
+  const toggleInterest = async (interest) => {
+    const existing = interests.find((item) => item.name.toLowerCase() === interest.name.toLowerCase())
+    try {
+      if (existing) await api.delete(`/users/me/interests/${existing.id}`)
+      else await api.post('/users/me/interests', interest)
+      load()
+    } catch (err) { setError(err.response?.data?.detail || 'Unable to update interests') }
+  }
+  const presets = [
+    { name: 'Technology', category: 'Technology' }, { name: 'Music', category: 'Music' },
+    { name: 'Design', category: 'Design' }, { name: 'Education', category: 'Education' },
+    { name: 'Community', category: 'Community' }, { name: 'Startups', category: 'Technology' },
+  ]
+  return <Page><div className="page-heading"><div><span className="eyebrow">YOUR PERSONAL UNIVERSE</span><h1>Profile & interests.</h1></div><span className="event-count">{interests.length} interests active</span></div><div className="profile-layout"><form className="panel" onSubmit={save}><span className="eyebrow">ABOUT YOU</span><h2>Profile</h2><label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Email<input disabled value={user.email} /></label>{error && <ErrorState message={error} />}<button className="button full">{saved ? 'Changes saved ✓' : 'Save changes'}</button></form><div className="panel interest-panel"><span className="eyebrow">YOUR TASTE</span><h2>What should we surface?</h2><p className="muted">Choose as many interests as you like. Your picks shape semantic recommendations and search ranking.</p><div className="interest-picker">{presets.map((item) => { const selected = interests.some((selectedItem) => selectedItem.name.toLowerCase() === item.name.toLowerCase()); return <button type="button" key={item.name} className={selected ? 'selected' : ''} onClick={() => toggleInterest(item)}><span>{item.name}</span><b>{selected ? '✓' : '+'}</b></button> })}</div></div></div></Page> }
 
 function Publisher() { const [events, setEvents] = useState([]); const [form, setForm] = useState({ title: '', description: '', category: '', location: '', start_time: '', end_time: '', capacity: '' }); const load = () => api.get('/events/mine').then(({ data }) => setEvents(data)); useEffect(load, []); const create = async (e) => { e.preventDefault(); await api.post('/events', { ...form, capacity: form.capacity ? Number(form.capacity) : null, tags: [] }); setForm({ title: '', description: '', category: '', location: '', start_time: '', end_time: '', capacity: '' }); load() }; const transition = async (id, action) => { await api.post(`/events/${id}/${action}`); load() }; return <Page><div className="page-heading"><span className="eyebrow">PUBLISHER STUDIO</span><h1>Build something people<br /><em>will remember.</em></h1></div><div className="publisher-layout"><form className="panel" onSubmit={create}><h2>Create event</h2>{['title', 'description', 'category', 'location', 'start_time', 'end_time', 'capacity'].map((field) => <input key={field} required={['title', 'description', 'start_time', 'end_time'].includes(field)} type={field.includes('time') ? 'datetime-local' : field === 'capacity' ? 'number' : 'text'} placeholder={field.replace('_', ' ')} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />)}<button className="button full">Save draft →</button></form><div className="panel"><h2>My events</h2>{events.map((event) => <div className="publisher-event" key={event.id}><div><strong>{event.title}</strong><span className={`status ${event.status.toLowerCase()}`}>{event.status}</span></div><div>{event.status === 'DRAFT' && <Link className="text-action" to={`/publisher/events/${event.id}/edit`}>Edit</Link>}{event.status === 'DRAFT' && <button className="text-action" onClick={() => transition(event.id, 'publish')}>Publish</button>}{event.status === 'PUBLISHED' && <button className="text-action" onClick={() => transition(event.id, 'cancel')}>Cancel</button>}</div></div>)}{!events.length && <EmptyState>No events yet.</EmptyState>}</div></div></Page> }
+
+function Admin() {
+  const [events, setEvents] = useState([]); const [form, setForm] = useState({ title: '', description: '', category: 'Technology', location: '', start_time: '', end_time: '', capacity: '100' }); const [error, setError] = useState('')
+  const load = () => api.get('/events/mine').then(({ data }) => setEvents(data)).catch((err) => setError(err.response?.data?.detail || 'Unable to load events'))
+  useEffect(load, [])
+  const create = async (event) => { event.preventDefault(); setError(''); try { await api.post('/events', { ...form, capacity: Number(form.capacity), tags: [form.category.toLowerCase(), 'featured'] }); setForm({ title: '', description: '', category: 'Technology', location: '', start_time: '', end_time: '', capacity: '100' }); load() } catch (err) { setError(err.response?.data?.detail || 'Unable to create event') } }
+  const transition = async (id, action) => { try { await api.post(`/events/${id}/${action}`); load() } catch (err) { setError(err.response?.data?.detail || 'Unable to update event') } }
+  const remove = async (id) => { if (!window.confirm('Delete this event permanently?')) return; try { await api.delete(`/events/${id}`); load() } catch (err) { setError(err.response?.data?.detail || 'Unable to delete event') } }
+  return <Page><div className="admin-hero"><div><span className="eyebrow">CONTROL ROOM</span><h1>Make the city<br /><em>come alive.</em></h1><p>Publish, curate, and keep every moment moving.</p></div><div className="admin-stats"><strong>{events.length}</strong><span>events<br />managed</span></div></div>{error && <ErrorState message={error} />}<div className="admin-layout"><form className="panel admin-form" onSubmit={create}><div><span className="eyebrow">NEW LISTING</span><h2>Create an event</h2></div>{['title', 'description', 'location', 'start_time', 'end_time', 'capacity'].map((field) => <input key={field} required={['title', 'description', 'start_time', 'end_time'].includes(field)} type={field.includes('time') ? 'datetime-local' : field === 'capacity' ? 'number' : 'text'} placeholder={field.replace('_', ' ')} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />)}<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Technology</option><option>Music</option><option>Design</option><option>Education</option><option>Community</option></select><button className="button full">Create draft →</button></form><div className="panel admin-events"><div className="section-heading"><div><span className="eyebrow">LIVE INVENTORY</span><h2>All events</h2></div><span className="status published">ADMIN ACCESS</span></div>{events.map((event) => <div className="admin-event" key={event.id}><div><strong>{event.title}</strong><span className="muted">{event.category || 'Community'} · {new Date(event.start_time).toLocaleDateString()}</span></div><span className={`status ${event.status.toLowerCase()}`}>{event.status}</span><div className="admin-actions">{event.status === 'DRAFT' && <button className="text-action" onClick={() => transition(event.id, 'publish')}>Publish</button>}{event.status === 'PUBLISHED' && <button className="text-action" onClick={() => transition(event.id, 'cancel')}>Cancel</button>}{event.status !== 'CANCELLED' && <button className="text-action danger" onClick={() => remove(event.id)}>Delete</button>}</div></div>)}{!events.length && <EmptyState>Create your first event above.</EmptyState>}</div></div><SponsoredSpotlight /></Page>
+}
 
 function EditEvent() { const { id } = useParams(); const navigate = useNavigate(); const [form, setForm] = useState(null); const [error, setError] = useState(''); useEffect(() => { api.get(`/events/${id}`).then(({ data }) => setForm(data)).catch(() => api.get('/events/mine').then(({ data }) => setForm(data.find((item) => item.id === Number(id))))); }, [id]); if (!form) return <Page><LoadingSpinner /></Page>; const save = async (e) => { e.preventDefault(); try { await api.put(`/events/${id}`, { title: form.title, description: form.description, category: form.category, location: form.location, capacity: form.capacity, tags: form.tags || [], start_time: form.start_time, end_time: form.end_time }); navigate('/publisher') } catch (err) { setError(err.response?.data?.detail || 'Unable to save event') } }; return <Page><div className="panel narrow"><h2>Edit event</h2>{['title', 'description', 'category', 'location', 'start_time', 'end_time', 'capacity'].map((field) => <input key={field} required={['title', 'description', 'start_time', 'end_time'].includes(field)} type={field.includes('time') ? 'datetime-local' : field === 'capacity' ? 'number' : 'text'} value={form[field] || ''} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />)}{error && <ErrorState message={error} />}<button className="button full" onClick={save}>Save changes</button></div></Page> }
 
@@ -128,8 +192,8 @@ function LocalEventList({ storageKey, title, empty }) {
 }
 
 function Page({ children, narrow = false }) { return <><Navbar /><main className={narrow ? 'page narrow' : 'page'}>{children}</main><footer>EventSphere · Find your people, places, and moments.</footer></> }
-function Landing() { return <Page><div className="landing"><span className="eyebrow">THE WORLD IS FULL OF MOMENTS</span><h1>Meet your next<br /><em>favorite thing.</em></h1><p>EventSphere makes it easier to find meaningful events, communities, and experiences tailored to you.</p><div><Link className="button" to="/explore">Start exploring →</Link><Link className="button ghost" to="/register">Create account</Link></div></div></Page> }
+function Landing() { return <Page><div className="landing"><span className="eyebrow">THE WORLD IS FULL OF MOMENTS</span><h1>Meet your next<br /><em>favorite thing.</em></h1><p>EventSphere makes it easier to find meaningful events, communities, and experiences tailored to you.</p><div><Link className="button" to="/explore">Start exploring →</Link><Link className="button ghost" to="/register">Create account</Link></div></div><SponsoredSpotlight /></Page> }
 
 export default function App() {
-  return <BrowserRouter><AuthProvider><Routes><Route path="/" element={<Landing />} /><Route path="/login" element={<AuthForm />} /><Route path="/register" element={<AuthForm register />} /><Route path="/explore" element={<Explore />} /><Route path="/events/:id" element={<EventDetails />} /><Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} /><Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} /><Route path="/saved" element={<ProtectedRoute><LocalEventList storageKey="eventsphere_saved" title="Saved events." empty="Save events from explore to find them here." /></ProtectedRoute>} /><Route path="/registered" element={<ProtectedRoute><LocalEventList storageKey="eventsphere_registered" title="Registered events." empty="Your registered events will appear here." /></ProtectedRoute>} /><Route path="/publisher" element={<ProtectedRoute role="PUBLISHER"><Publisher /></ProtectedRoute>} /><Route path="/publisher/events/:id/edit" element={<ProtectedRoute role="PUBLISHER"><EditEvent /></ProtectedRoute>} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></AuthProvider></BrowserRouter>
+  return <BrowserRouter><AuthProvider><Routes><Route path="/" element={<Landing />} /><Route path="/login" element={<AuthForm />} /><Route path="/register" element={<AuthForm register />} /><Route path="/explore" element={<Explore />} /><Route path="/events/:id" element={<EventDetails />} /><Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} /><Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} /><Route path="/saved" element={<ProtectedRoute><LocalEventList storageKey="eventsphere_saved" title="Saved events." empty="Save events from explore to find them here." /></ProtectedRoute>} /><Route path="/registered" element={<ProtectedRoute><LocalEventList storageKey="eventsphere_registered" title="Registered events." empty="Your registered events will appear here." /></ProtectedRoute>} /><Route path="/publisher" element={<ProtectedRoute role="PUBLISHER"><Publisher /></ProtectedRoute>} /><Route path="/publisher/events/:id/edit" element={<ProtectedRoute role="PUBLISHER"><EditEvent /></ProtectedRoute>} /><Route path="/admin" element={<ProtectedRoute role="ADMIN"><Admin /></ProtectedRoute>} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></AuthProvider></BrowserRouter>
 }
