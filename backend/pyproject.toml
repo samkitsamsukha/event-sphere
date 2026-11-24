@@ -13,7 +13,6 @@ dependencies = [
     "PyJWT>=2.10",
     "pwdlib[argon2]>=0.2",
     "email-validator>=2.2",
-    "sentence-transformers>=3.4",
     "pgvector>=0.3",
 ]
 

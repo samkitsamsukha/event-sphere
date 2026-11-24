@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(min_length=32)
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     recommendation_interaction_view_weight: float = 1.0
     recommendation_interaction_click_weight: float = 2.0
     recommendation_interaction_like_weight: float = 4.0
